@@ -1,0 +1,4 @@
+.room-code-field { margin-top: 10px; }
+.room-code-field input { text-transform: uppercase; letter-spacing: 3px; font-weight: 700; }
+.room-lobby-status { margin: 0 0 10px; padding: 10px 12px; background: #edf6f0; border: 1px solid #9bbdaa; color: #205f3d; font-size: 11px; text-align: center; line-height: 1.6; }
+.primary-button:disabled, .room-actions button:disabled { cursor: not-allowed; opacity: .5; }
