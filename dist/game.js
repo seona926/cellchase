@@ -1,4 +1,4 @@
-import {joinRoom as joinPeerRoom,selfId} from 'https://esm.run/trystero';
+import {joinRoom as joinPeerRoom,selfId} from 'https://esm.run/@trystero-p2p/mqtt';
 
 const COLS=20,ROWS=18,BOMB_FUSE=1500,BOMB_COOLDOWN=8000,NEW_SEEKER_GRACE=1500;
 const DIFFICULTY={easy:{ratio:.05,vision:Infinity,bot:340},medium:{ratio:.12,vision:5,bot:240},hard:{ratio:.2,vision:3,bot:155}};
@@ -15,7 +15,7 @@ const templates={
 
 let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,target:2,duration:180,endsAt:0,startedAt:0,countdownEndsAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null};
 let cells=new Map(),raf=0,toastTimer=0,captureTimer=0;
-const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0};
+const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0,connectTimer:0};
 const coord=(r,c)=>`${r}:${c}`;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const distance=(a,b)=>Math.abs(a.row-b.row)+Math.abs(a.col-b.col);
@@ -45,11 +45,17 @@ function updateRoomLobby(message=''){
   $('#quickStart').textContent=network.isHost?'게임 시작':'방장 시작 대기';$('#quickStart').disabled=!network.isHost||count<2;
   $('#connectionState').textContent=network.active?`WebRTC · 방 ${network.code}`:'로컬 데모 · 연결됨';
 }
-async function leaveNetwork(){if(network.room)await network.room.leave();Object.assign(network,{active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0})}
+async function leaveNetwork(){clearTimeout(network.connectTimer);if(network.room)await network.room.leave();Object.assign(network,{active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0,connectTimer:0})}
+function openPeerRoom(code){
+  return joinPeerRoom({appId:'kr.madebyus.cellchase.v2',relayConfig:{redundancy:3}},code,{onJoinError:()=>{if(!network.isHost&&!network.hostPeer){clearTimeout(network.connectTimer);updateRoomLobby('연결에 실패했습니다. 아래 다시 연결 버튼을 눌러주세요.');$('#joinRoom').disabled=false;$('#joinRoom').textContent='다시 연결'}}})
+}
+function watchGuestConnection(){
+  clearTimeout(network.connectTimer);network.connectTimer=setTimeout(()=>{if(network.active&&!network.isHost&&!network.hostPeer){updateRoomLobby('연결이 지연되고 있습니다. 아래 다시 연결 버튼을 눌러주세요.');$('#joinRoom').disabled=false;$('#joinRoom').textContent='다시 연결'}},12000)
+}
 function setupActions(){
   network.hello=network.room.makeAction('hello');network.welcome=network.room.makeAction('welcome');network.snapshot=network.room.makeAction('snapshot');network.command=network.room.makeAction('command');network.chat=network.room.makeAction('chat');network.event=network.room.makeAction('event');
   network.hello.onMessage=(data,{peerId})=>{if(!network.isHost||state.players.some(p=>p.id===peerId))return;if(state.players.length>=10){network.welcome.send({error:'방이 가득 찼습니다.'},{target:peerId});return}state.players.push(playerRecord(peerId,String(data.name||'게스트')));network.welcome.send({playerId:peerId,hostPeer:selfId,code:network.code},{target:peerId});sendSnapshot(peerId);updateRoomLobby();render();announce(`${data.name||'친구'}님이 입장했습니다.`)};
-  network.welcome.onMessage=(data,{peerId})=>{if(network.isHost)return;if(data.error){updateRoomLobby(data.error);return}network.playerId=data.playerId;network.hostPeer=data.hostPeer||peerId;updateRoomLobby('방에 연결되었습니다 · 방장의 시작을 기다리는 중')};
+  network.welcome.onMessage=(data,{peerId})=>{if(network.isHost)return;if(data.error){updateRoomLobby(data.error);return}clearTimeout(network.connectTimer);network.playerId=data.playerId;network.hostPeer=data.hostPeer||peerId;$('#joinRoom').disabled=true;$('#joinRoom').textContent='코드로 참가';updateRoomLobby('방에 연결되었습니다 · 방장의 시작을 기다리는 중')};
   network.snapshot.onMessage=(data,{peerId})=>{if(!network.hostPeer||peerId===network.hostPeer)applySnapshot(data)};
   network.command.onMessage=(data,{peerId})=>{if(!network.isHost||state.phase!=='playing')return;const p=state.players.find(x=>x.id===peerId);if(!p)return;const now=performance.now(),dirs={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]};if(data.type==='move'&&dirs[data.direction])tryMove(p,...dirs[data.direction],now);if(data.type==='bomb')placeBomb(p,now);if(data.type==='chat'&&String(data.text||'').trim()){const text=String(data.text).trim().slice(0,80);appendChat(p.name,text);network.chat.send({name:p.name,text})}sendSnapshot()};
   network.chat.onMessage=data=>{if(!network.isHost)appendChat(String(data.name||'친구'),String(data.text||'').slice(0,80))};
@@ -57,8 +63,8 @@ function setupActions(){
   network.room.onPeerJoin=peerId=>{if(!network.isHost)network.hello.send({name:$('#nickname').value.trim().slice(0,10)||'게스트'},{target:peerId})};
   network.room.onPeerLeave=peerId=>{if(network.isHost){const p=state.players.find(x=>x.id===peerId);if(p){p.connected=false;announce(`${p.name}님의 연결이 끊겼습니다.`);setTimeout(()=>{if(!p.connected&&state.phase==='lobby'){state.players=state.players.filter(x=>x!==p);updateRoomLobby();sendSnapshot()}},15000)}}else if(peerId===network.hostPeer){state.phase='lobby';updateRoomLobby('방장과 연결이 끊겼습니다. 새로고침 후 다시 참가해주세요.')}};
 }
-async function createOnlineRoom(){await leaveNetwork();const nickname=$('#nickname').value.trim()||'방장';localStorage.setItem('cellChaseNickname',nickname);network.active=true;network.isHost=true;network.code=roomCode();network.playerId=selfId;network.room=joinPeerRoom({appId:'kr.madebyus.cellchase'},network.code);state.phase='lobby';state.players=[playerRecord(selfId,nickname,true)];setupActions();$('#roomCodeInput').value=network.code;$('#createRoom').disabled=true;$('#joinRoom').disabled=true;updateRoomLobby();render();notify(`방 코드 ${network.code} · 친구에게 공유하세요`)}
-async function joinOnlineRoom(){const code=$('#roomCodeInput').value.trim().toUpperCase().replace(/[^A-Z2-9]/g,'');if(code.length!==6){notify('6자리 방 코드를 입력해주세요.');return}await leaveNetwork();const nickname=$('#nickname').value.trim()||`게스트${Math.floor(100+Math.random()*900)}`;localStorage.setItem('cellChaseNickname',nickname);network.active=true;network.code=code;network.room=joinPeerRoom({appId:'kr.madebyus.cellchase'},code);state.phase='lobby';state.players=[playerRecord('waiting',nickname,true)];setupActions();$('#createRoom').disabled=true;$('#joinRoom').disabled=true;updateRoomLobby('초대받은 방에 연결하는 중입니다…');render()}
+async function createOnlineRoom(){await leaveNetwork();const nickname=$('#nickname').value.trim()||'방장';localStorage.setItem('cellChaseNickname',nickname);network.active=true;network.isHost=true;network.code=roomCode();network.playerId=selfId;network.room=openPeerRoom(network.code);state.phase='lobby';state.players=[playerRecord(selfId,nickname,true)];setupActions();$('#roomCodeInput').value=network.code;$('#createRoom').disabled=true;$('#joinRoom').disabled=true;updateRoomLobby();render();notify(`방 코드 ${network.code} · 친구에게 공유하세요`)}
+async function joinOnlineRoom(){const code=$('#roomCodeInput').value.trim().toUpperCase().replace(/[^A-Z2-9]/g,'');if(code.length!==6){notify('6자리 방 코드를 입력해주세요.');return}await leaveNetwork();const nickname=$('#nickname').value.trim()||`게스트${Math.floor(100+Math.random()*900)}`;localStorage.setItem('cellChaseNickname',nickname);network.active=true;network.code=code;network.playerId=selfId;network.room=openPeerRoom(code);state.phase='lobby';state.players=[playerRecord(selfId,nickname,true)];setupActions();$('#createRoom').disabled=true;$('#joinRoom').disabled=true;updateRoomLobby('초대받은 방을 찾는 중입니다…');watchGuestConnection();render()}
 
 function buildGrid(){
   els.grid.textContent='';cells.clear();
