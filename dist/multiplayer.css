@@ -2,3 +2,13 @@
 .room-code-field input { text-transform: uppercase; letter-spacing: 3px; font-weight: 700; }
 .room-lobby-status { margin: 0 0 10px; padding: 10px 12px; background: #edf6f0; border: 1px solid #9bbdaa; color: #205f3d; font-size: 11px; text-align: center; line-height: 1.6; }
 .primary-button:disabled, .room-actions button:disabled { cursor: not-allowed; opacity: .5; }
+.capture-banner { position: fixed; z-index: 180; left: 50%; top: 43%; min-width: 330px; max-width: 540px; display: flex; align-items: center; justify-content: center; gap: 13px; transform: translate(-50%, -50%); padding: 14px 20px; color: #fff; background: rgba(177, 32, 37, .96); border: 1px solid rgba(255,255,255,.7); box-shadow: 0 12px 34px rgba(0,0,0,.3); pointer-events: none; animation: capture-pop 1.15s ease both; }
+.capture-banner.bomb { background: linear-gradient(100deg, rgba(157,72,5,.97), rgba(209,52,36,.97)); }
+.capture-banner.hidden { display: none; }
+.capture-icon { width: 38px; height: 38px; display: grid; place-items: center; flex: none; border-radius: 50%; background: rgba(255,255,255,.18); font-size: 22px; font-weight: 800; }
+.capture-banner strong { display: block; font-size: 20px; letter-spacing: -.5px; }
+.capture-banner span { display: block; margin-top: 2px; font-size: 11px; opacity: .9; }
+.captured-flash { animation: captured-cell .95s ease-out !important; }
+@keyframes capture-pop { 0% { opacity: 0; transform: translate(-50%,-42%) scale(.78); } 15%,72% { opacity: 1; transform: translate(-50%,-50%) scale(1); } 100% { opacity: 0; transform: translate(-50%,-58%) scale(.96); } }
+@keyframes captured-cell { 0%,100% { box-shadow: inset 0 0 0 2px #d13438; } 28% { background: #ffb347; box-shadow: inset 0 0 0 4px #fff, 0 0 18px #ff8a00; transform: scale(1.08); } 58% { background: #ffe2e2; box-shadow: inset 0 0 0 3px #d13438; } }
+@media (prefers-reduced-motion: reduce) { .capture-banner { animation: none; } .captured-flash { animation: none !important; } }

@@ -14,8 +14,8 @@ const templates={
 };
 
 let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,target:2,duration:180,endsAt:0,startedAt:0,countdownEndsAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null};
-let cells=new Map(),raf=0,toastTimer=0;
-const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,lastSync:0};
+let cells=new Map(),raf=0,toastTimer=0,captureTimer=0;
+const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0};
 const coord=(r,c)=>`${r}:${c}`;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const distance=(a,b)=>Math.abs(a.row-b.row)+Math.abs(a.col-b.col);
@@ -40,14 +40,15 @@ function updateRoomLobby(message=''){
   $('#quickStart').textContent=network.isHost?'게임 시작':'방장 시작 대기';$('#quickStart').disabled=!network.isHost||count<2;
   $('#connectionState').textContent=network.active?`WebRTC · 방 ${network.code}`:'로컬 데모 · 연결됨';
 }
-async function leaveNetwork(){if(network.room)await network.room.leave();Object.assign(network,{active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,lastSync:0})}
+async function leaveNetwork(){if(network.room)await network.room.leave();Object.assign(network,{active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0})}
 function setupActions(){
-  network.hello=network.room.makeAction('hello');network.welcome=network.room.makeAction('welcome');network.snapshot=network.room.makeAction('snapshot');network.command=network.room.makeAction('command');network.chat=network.room.makeAction('chat');
+  network.hello=network.room.makeAction('hello');network.welcome=network.room.makeAction('welcome');network.snapshot=network.room.makeAction('snapshot');network.command=network.room.makeAction('command');network.chat=network.room.makeAction('chat');network.event=network.room.makeAction('event');
   network.hello.onMessage=(data,{peerId})=>{if(!network.isHost||state.players.some(p=>p.id===peerId))return;if(state.players.length>=10){network.welcome.send({error:'방이 가득 찼습니다.'},{target:peerId});return}state.players.push(playerRecord(peerId,String(data.name||'게스트')));network.welcome.send({playerId:peerId,hostPeer:selfId,code:network.code},{target:peerId});sendSnapshot(peerId);updateRoomLobby();render();announce(`${data.name||'친구'}님이 입장했습니다.`)};
   network.welcome.onMessage=(data,{peerId})=>{if(network.isHost)return;if(data.error){updateRoomLobby(data.error);return}network.playerId=data.playerId;network.hostPeer=data.hostPeer||peerId;updateRoomLobby('방에 연결되었습니다 · 방장의 시작을 기다리는 중')};
   network.snapshot.onMessage=(data,{peerId})=>{if(!network.hostPeer||peerId===network.hostPeer)applySnapshot(data)};
   network.command.onMessage=(data,{peerId})=>{if(!network.isHost||state.phase!=='playing')return;const p=state.players.find(x=>x.id===peerId);if(!p)return;const now=performance.now(),dirs={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]};if(data.type==='move'&&dirs[data.direction])tryMove(p,...dirs[data.direction],now);if(data.type==='bomb')placeBomb(p,now);if(data.type==='chat'&&String(data.text||'').trim()){const text=String(data.text).trim().slice(0,80);appendChat(p.name,text);network.chat.send({name:p.name,text})}sendSnapshot()};
   network.chat.onMessage=data=>{if(!network.isHost)appendChat(String(data.name||'친구'),String(data.text||'').slice(0,80))};
+  network.event.onMessage=(data,{peerId})=>{if(!network.isHost&&(!network.hostPeer||peerId===network.hostPeer))showCaptureEvent(data)};
   network.room.onPeerJoin=peerId=>{if(!network.isHost)network.hello.send({name:$('#nickname').value.trim().slice(0,10)||'게스트'},{target:peerId})};
   network.room.onPeerLeave=peerId=>{if(network.isHost){const p=state.players.find(x=>x.id===peerId);if(p){p.connected=false;announce(`${p.name}님의 연결이 끊겼습니다.`);setTimeout(()=>{if(!p.connected&&state.phase==='lobby'){state.players=state.players.filter(x=>x!==p);updateRoomLobby();sendSnapshot()}},15000)}}else if(peerId===network.hostPeer){state.phase='lobby';updateRoomLobby('방장과 연결이 끊겼습니다. 새로고침 후 다시 참가해주세요.')}};
 }
@@ -126,7 +127,8 @@ function tryMove(player,dr,dc,now){
 
 function capture(victims,owner,method,now){
   const fresh=victims.filter(p=>p.role==='runner');if(!fresh.length)return;
-  for(const p of fresh){p.role='seeker';p.caughtAt=now;p.seekerActiveAt=now+NEW_SEEKER_GRACE;p.bombReady=now+NEW_SEEKER_GRACE;p.score+=Math.floor((now-state.startedAt)/1000);state.captures++;if(owner)owner.score+=method==='bomb'?40:60;announce(`${p.name}님이 술래가 되었습니다.`)}
+  for(const p of fresh){p.role='seeker';p.caughtAt=now;p.seekerActiveAt=now+NEW_SEEKER_GRACE;p.bombReadyAt=now+BOMB_COOLDOWN;p.bombReady=now+BOMB_COOLDOWN;p.score+=Math.floor((now-state.startedAt)/1000);state.captures++;if(owner)owner.score+=method==='bomb'?40:60}
+  const event={type:'capture',method,ownerName:owner?.name||'술래',victims:fresh.map(p=>({id:p.id,name:p.name,row:p.row,col:p.col}))};showCaptureEvent(event);if(network.active&&network.isHost)network.event?.send(event);
   if(state.captures>=state.target)finish('seekers','포획 목표 달성');
 }
 
@@ -181,6 +183,13 @@ function formatTime(seconds){const s=Math.max(0,Math.ceil(seconds));return `${St
 function announce(text){const p=document.createElement('p');p.className='system';p.textContent=text;els.chat.append(p);els.chat.scrollTop=els.chat.scrollHeight}
 function appendChat(name,text){const p=document.createElement('p'),b=document.createElement('b');b.textContent=`${name} `;p.append(b,document.createTextNode(text));els.chat.append(p);els.chat.scrollTop=els.chat.scrollHeight}
 function notify(text){clearTimeout(toastTimer);els.toast.textContent=text;els.toast.classList.add('show');toastTimer=setTimeout(()=>els.toast.classList.remove('show'),1500)}
+function showCaptureEvent(event){
+  if(!event?.victims?.length)return;const me=local(),caughtMe=event.victims.some(v=>v.id===me?.id),count=event.victims.length,first=event.victims[0].name;const label=count>1?`${first} 외 ${count-1}명`:`${first}님`;const chatSubject=count>1?`${label}이`:`${first}님이`;const bomb=event.method==='bomb';
+  const title=caughtMe?(bomb?'폭탄에 잡혔습니다!':'술래에게 잡혔습니다!'):`${label} 술래!`;const subtitle=bomb?`${event.ownerName}님의 폭탄 · ${count>1?`${count}명 동시 포획`:'이제 술래입니다'}`:`${event.ownerName}님이 직접 잡았습니다`;
+  $('#captureIcon').textContent=bomb?'💥':'!';$('#captureTitle').textContent=title;$('#captureSubtitle').textContent=subtitle;const banner=$('#captureBanner');banner.classList.toggle('bomb',bomb);banner.classList.remove('hidden');banner.style.animation='none';void banner.offsetWidth;banner.style.animation='';clearTimeout(captureTimer);captureTimer=setTimeout(()=>banner.classList.add('hidden'),1150);
+  for(const victim of event.victims){const cell=cells.get(coord(victim.row,victim.col));if(cell){cell.classList.remove('captured-flash');void cell.offsetWidth;cell.classList.add('captured-flash');setTimeout(()=>cell.classList.remove('captured-flash'),1000)}}
+  announce(bomb?`💥 ${chatSubject} ${event.ownerName}님의 폭탄에 잡혀 술래가 되었습니다!`:`${chatSubject} ${event.ownerName}님에게 잡혀 술래가 되었습니다!`);
+}
 
 function loop(now){
   if(state.phase==='countdown'&&!network.isHost&&network.active){const left=Math.max(0,state.countdownEndsAt-now);els.countdown.textContent=left>0?Math.max(1,Math.ceil(left/800)):'GO';els.countdown.classList.add('show');render()}
