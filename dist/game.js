@@ -1,6 +1,6 @@
 import {joinRoom as joinPeerRoom,selfId} from 'https://esm.run/@trystero-p2p/mqtt';
 
-const COLS=20,ROWS=18,BOMB_FUSE=1500,BOMB_COOLDOWN=8000,NEW_SEEKER_GRACE=1500;
+const COLS=20,ROWS=18,BOMB_FUSE=1500,BOMB_PLACE_DELAY=180,MAX_ACTIVE_BOMBS=3,NEW_SEEKER_GRACE=1500;
 const DIFFICULTY={easy:{ratio:.05,vision:Infinity,bot:340},medium:{ratio:.12,vision:5,bot:240},hard:{ratio:.2,vision:3,bot:155}};
 const BOT_NAMES=['민지','도윤','서준','하린','유나','지후','수아','현우','지민'];
 const $=s=>document.querySelector(s);
@@ -164,12 +164,15 @@ function resolveContact(mover,now){
 }
 
 function placeBomb(player,now){
-  if(state.phase!=='playing'||player.role!=='seeker'||now<player.seekerActiveAt||now<player.bombReady||state.bombs.some(b=>b.owner===player.id&&!b.resolved)){if(player.local&&player.role!=='seeker')notify('폭탄은 술래만 사용할 수 있습니다.');return}
-  state.bombs.push({id:crypto.randomUUID(),owner:player.id,row:player.row,col:player.col,explodesAt:now+BOMB_FUSE,resolved:false});player.bombReady=now+BOMB_COOLDOWN;notify('폭탄 설치 · 1.5초');
+  const active=state.bombs.filter(b=>b.owner===player.id&&!b.resolved).length;
+  if(state.phase!=='playing'||player.role!=='seeker'||now<player.seekerActiveAt||now<player.bombReady||active>=MAX_ACTIVE_BOMBS){if(player.local&&player.role!=='seeker')notify('폭탄은 술래만 사용할 수 있습니다.');else if(player.local&&active>=MAX_ACTIVE_BOMBS)notify('폭탄은 동시에 3개까지 설치할 수 있습니다.');return}
+  state.bombs.push({id:crypto.randomUUID(),owner:player.id,row:player.row,col:player.col,explodesAt:now+BOMB_FUSE,resolved:false});player.bombReady=now+BOMB_PLACE_DELAY;notify(`폭탄 설치 · ${active+1}/3`);
 }
 
 function explodeBomb(b,now){
-  b.resolved=true;const ranges=[[b.row,b.col],[b.row-1,b.col],[b.row+1,b.col],[b.row,b.col-1],[b.row,b.col+1]].filter(([r,c])=>r>=0&&r<ROWS&&c>=0&&c<COLS&&!state.blocked.has(coord(r,c)));const keys=new Set(ranges.map(x=>coord(...x)));for(const k of keys){const el=cells.get(k);if(el){el.classList.add('blast');setTimeout(()=>el.classList.remove('blast'),360)}}const victims=state.players.filter(p=>p.role==='runner'&&keys.has(coord(p.row,p.col)));capture(victims,state.players.find(p=>p.id===b.owner),'bomb',now)
+  b.resolved=true;const radius={easy:2,medium:3,hard:4}[state.difficulty]||2,ranges=[[b.row,b.col]];
+  for(const [dr,dc] of [[-1,0],[1,0],[0,-1],[0,1]])for(let step=1;step<=radius;step++){const r=b.row+dr*step,c=b.col+dc*step;if(r<0||r>=ROWS||c<0||c>=COLS)break;if(state.blocked.has(coord(r,c)))break;ranges.push([r,c])}
+  const keys=new Set(ranges.map(x=>coord(...x)));for(const k of keys){const el=cells.get(k);if(el){el.classList.add('blast');setTimeout(()=>el.classList.remove('blast'),360)}}const victims=state.players.filter(p=>p.role==='runner'&&keys.has(coord(p.row,p.col)));capture(victims,state.players.find(p=>p.id===b.owner),'bomb',now)
 }
 
 function botStep(p,now){
@@ -203,7 +206,7 @@ function renderPlayers(){
 
 function render(){
   renderGrid();renderPlayers();els.goal.textContent=`${state.captures} / ${state.target}`;els.progress.style.width=`${state.target?state.captures/state.target*100:0}%`;els.mode.textContent=state.phase==='playing'?`${state.difficulty.toUpperCase()} · ${seekerCount()} 술래`:state.phase==='finished'?'게임 종료':'시작 준비';
-  const me=local(),now=performance.now();if(me){const ready=Math.max(0,me.bombReady-now);els.bombStatus.textContent=me.role!=='seeker'?'술래 전용':ready>0?`${(ready/1000).toFixed(1)}초`:'사용 가능';els.bombCooldown.style.width=`${ready?ready/BOMB_COOLDOWN*100:0}%`}
+  const me=local(),now=performance.now();if(me){const active=state.bombs.filter(b=>b.owner===me.id&&!b.resolved).length,ready=Math.max(0,me.bombReady-now);els.bombStatus.textContent=me.role!=='seeker'?'술래 전용':active>=MAX_ACTIVE_BOMBS?'3/3 설치됨':ready>0?'설치 준비 중':`${MAX_ACTIVE_BOMBS-active}/3 설치 가능`;els.bombCooldown.style.width=`${active/MAX_ACTIVE_BOMBS*100}%`}
 }
 
 function formatTime(seconds){const s=Math.max(0,Math.ceil(seconds));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
@@ -229,9 +232,9 @@ function loop(now){
   raf=requestAnimationFrame(loop);
 }
 
-const keyDirection=k=>({ArrowUp:'up',w:'up',W:'up',ArrowDown:'down',s:'down',S:'down',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right'})[k];
-document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e.key);if(d&&state.phase==='playing'){e.preventDefault();const firstPress=!input.keys.includes(d);input.keys=input.keys.filter(x=>x!==d);input.keys.push(d);if(firstPress)dispatchMove(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
-document.addEventListener('keyup',e=>{const d=keyDirection(e.key);if(d)input.keys=input.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>input.keys=[]);
+const keyDirection=e=>({ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'})[e.code]||({ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'})[e.key];
+document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e);if(d&&state.phase==='playing'){e.preventDefault();const firstPress=!input.keys.includes(d);input.keys=input.keys.filter(x=>x!==d);input.keys.push(d);if(firstPress)dispatchMove(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
+document.addEventListener('keyup',e=>{const d=keyDirection(e);if(d)input.keys=input.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>input.keys=[]);
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.target.blur()} });
 $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;if(network.active&&!network.isHost)network.command?.send({type:'chat',text},{target:network.hostPeer});else{appendChat(local()?.name||'나',text);if(network.active)network.chat?.send({name:local()?.name||'방장',text})}input.value='';input.blur()});
 $('#roomCodeInput').addEventListener('input',e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,6));
