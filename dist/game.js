@@ -15,6 +15,7 @@ const templates={
 
 let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,target:2,duration:180,endsAt:0,startedAt:0,countdownEndsAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null};
 let cells=new Map(),raf=0,toastTimer=0,captureTimer=0;
+const input={keys:[],lastSent:0};
 const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0,connectTimer:0,turnReady:false};
 const coord=(r,c)=>`${r}:${c}`;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
@@ -135,7 +136,7 @@ function prepareOnlinePlayers(){
 
 function startGame(reuse=false){
   if(network.active&&!network.isHost)return;if(network.active&&state.players.filter(p=>p.connected!==false).length<2){notify('친구가 한 명 이상 입장해야 시작할 수 있습니다.');return}
-  const nick=$('#nickname').value.trim().slice(0,10)||'나';state.template=$('#templateSelect').value;state.difficulty=$('#difficultySelect').value;state.duration=Number($('#durationSelect').value);state.speed=Number($('#speedSelect').value);state.roundId++;
+  const nick=$('#nickname').value.trim().slice(0,10)||'나';state.template=$('#templateSelect').value;state.difficulty=$('#difficultySelect').value;state.duration=Number($('#durationSelect').value);state.speed=Number($('#speedSelect').value);state.roundId++;input.keys=[];input.lastSent=0;
   generateObstacles();state.players=network.active?prepareOnlinePlayers():createPlayers(nick);state.bombs=[];state.captures=0;state.target=Math.ceil((state.players.length-1)/2);state.winner=null;state.phase='countdown';state.countdownEndsAt=performance.now()+2400;paintTemplate();els.lobby.classList.add('hidden');els.result.classList.add('hidden');sendSnapshot();
   let count=3;els.countdown.textContent=count;els.countdown.classList.add('show');render();const round=state.roundId;
   const tick=setInterval(()=>{if(round!==state.roundId){clearInterval(tick);return}count--;if(count>0)els.countdown.textContent=count;else{clearInterval(tick);els.countdown.textContent='GO';setTimeout(()=>{if(round===state.roundId)els.countdown.classList.remove('show')},450);state.phase='playing';state.startedAt=performance.now();state.endsAt=state.startedAt+state.duration*1000;state.players.forEach(p=>{if(p.role==='seeker')p.seekerActiveAt=state.startedAt});announce('게임이 시작되었습니다. 들키지 마세요.');sendSnapshot();render() }},800);
@@ -145,6 +146,10 @@ function tryMove(player,dr,dc,now){
   if(state.phase!=='playing'||now-player.lastMove<state.speed)return false;if(player.role==='seeker'&&now<player.seekerActiveAt)return false;
   const nr=player.row+dr,nc=player.col+dc,k=coord(nr,nc);if(nr<0||nr>=ROWS||nc<0||nc>=COLS||state.blocked.has(k))return false;
   player.row=nr;player.col=nc;player.lastMove=now;resolveContact(player,now);return true;
+}
+function dispatchMove(direction,now=performance.now()){
+  const map={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]},delta=map[direction];if(!delta||state.phase!=='playing')return;
+  if(network.active&&!network.isHost)network.command?.send({type:'move',direction},{target:network.hostPeer});else tryMove(local(),...delta,now);input.lastSent=now
 }
 
 function capture(victims,owner,method,now){
@@ -216,7 +221,7 @@ function showCaptureEvent(event){
 function loop(now){
   if(state.phase==='countdown'&&!network.isHost&&network.active){const left=Math.max(0,state.countdownEndsAt-now);els.countdown.textContent=left>0?Math.max(1,Math.ceil(left/800)):'GO';els.countdown.classList.add('show');render()}
   if(state.phase==='playing'){
-    const direction=state.keys.at(-1);if(direction&&now-state.lastInput>=state.speed){const map={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]};if(network.active&&!network.isHost)network.command?.send({type:'move',direction},{target:network.hostPeer});else tryMove(local(),...map[direction],now);state.lastInput=now}
+    const direction=input.keys.at(-1);if(direction&&now-input.lastSent>=state.speed)dispatchMove(direction,now);
     if(!network.active||network.isHost){if(!network.active)state.players.filter(p=>!p.local).forEach(p=>botStep(p,now));state.bombs.filter(b=>!b.resolved&&now>=b.explodesAt).forEach(b=>explodeBomb(b,now));state.bombs=state.bombs.filter(b=>!b.resolved||now-b.explodesAt<500);if(now>=state.endsAt)finish('runners','제한 시간 생존')}
     els.timer.textContent=formatTime((state.endsAt-now)/1000);render();
   }
@@ -225,8 +230,8 @@ function loop(now){
 }
 
 const keyDirection=k=>({ArrowUp:'up',w:'up',W:'up',ArrowDown:'down',s:'down',S:'down',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right'})[k];
-document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e.key);if(d&&state.phase==='playing'){e.preventDefault();state.keys=state.keys.filter(x=>x!==d);state.keys.push(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
-document.addEventListener('keyup',e=>{const d=keyDirection(e.key);if(d)state.keys=state.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>state.keys=[]);
+document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e.key);if(d&&state.phase==='playing'){e.preventDefault();const firstPress=!input.keys.includes(d);input.keys=input.keys.filter(x=>x!==d);input.keys.push(d);if(firstPress)dispatchMove(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
+document.addEventListener('keyup',e=>{const d=keyDirection(e.key);if(d)input.keys=input.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>input.keys=[]);
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.target.blur()} });
 $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;if(network.active&&!network.isHost)network.command?.send({type:'chat',text},{target:network.hostPeer});else{appendChat(local()?.name||'나',text);if(network.active)network.chat?.send({name:local()?.name||'방장',text})}input.value='';input.blur()});
 $('#roomCodeInput').addEventListener('input',e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,6));
