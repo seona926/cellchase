@@ -15,8 +15,8 @@ const templates={
 
 let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,target:2,duration:180,endsAt:0,startedAt:0,countdownEndsAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null};
 let cells=new Map(),raf=0,toastTimer=0,captureTimer=0;
-const input={keys:[],lastSent:0};
-const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0,connectTimer:0,turnReady:false};
+const input={keys:[],lastSent:0,pressed:new Set()};
+const network={active:false,isHost:false,room:null,code:'',playerId:'',hostPeer:'',hello:null,welcome:null,snapshot:null,command:null,chat:null,event:null,lastSync:0,connectTimer:0,turnReady:false,snapshotSeq:0,lastSnapshotSeq:0};
 const coord=(r,c)=>`${r}:${c}`;
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const distance=(a,b)=>Math.abs(a.row-b.row)+Math.abs(a.col-b.col);
@@ -32,10 +32,10 @@ let turnServersPromise=null;
 
 function roomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join('')}
 function playerRecord(id,name,isLocal=false){return{id,name:name.slice(0,10)||'게스트',row:0,col:0,role:'runner',local:isLocal,score:0,caughtAt:null,seekerActiveAt:0,lastMove:0,bombReady:0,botMove:0,connected:true}}
-function snapshotData(){const now=performance.now();return{now,state:{...state,blocked:[...state.blocked],keys:[],players:state.players.map(({local,...p})=>p)}}}
+function snapshotData(){const now=performance.now();return{now,seq:++network.snapshotSeq,state:{...state,blocked:[...state.blocked],keys:[],players:state.players.map(({local,...p})=>p)}}}
 function sendSnapshot(target){if(!network.active||!network.isHost||!network.snapshot)return;network.snapshot.send(snapshotData(),target?{target}:undefined)}
 function applySnapshot(packet){
-  if(network.isHost||!packet?.state)return;const previous=state.phase,offset=performance.now()-packet.now,s=packet.state;
+  if(network.isHost||!packet?.state||!Number.isFinite(packet.seq)||packet.seq<=network.lastSnapshotSeq)return;network.lastSnapshotSeq=packet.seq;const previous=state.phase,offset=performance.now()-packet.now,s=packet.state;
   state={...s,blocked:new Set(s.blocked),keys:[],startedAt:s.startedAt+offset,endsAt:s.endsAt+offset,countdownEndsAt:s.countdownEndsAt+offset,players:s.players.map(p=>({...p,local:p.id===network.playerId,seekerActiveAt:p.seekerActiveAt+offset,lastMove:p.lastMove+offset,bombReady:p.bombReady+offset})),bombs:s.bombs.map(b=>({...b,explodesAt:b.explodesAt+offset}))};
   if(previous!==state.phase&&state.phase==='countdown'){els.lobby.classList.add('hidden');els.result.classList.add('hidden');els.countdown.classList.add('show')}
   if(state.phase==='playing')els.countdown.classList.remove('show');
@@ -136,7 +136,7 @@ function prepareOnlinePlayers(){
 
 function startGame(reuse=false){
   if(network.active&&!network.isHost)return;if(network.active&&state.players.filter(p=>p.connected!==false).length<2){notify('친구가 한 명 이상 입장해야 시작할 수 있습니다.');return}
-  const nick=$('#nickname').value.trim().slice(0,10)||'나';state.template=$('#templateSelect').value;state.difficulty=$('#difficultySelect').value;state.duration=Number($('#durationSelect').value);state.speed=Number($('#speedSelect').value);state.roundId++;input.keys=[];input.lastSent=0;
+  const nick=$('#nickname').value.trim().slice(0,10)||'나';state.template=$('#templateSelect').value;state.difficulty=$('#difficultySelect').value;state.duration=Number($('#durationSelect').value);state.speed=Number($('#speedSelect').value);state.roundId++;input.keys=[];input.lastSent=0;input.pressed.clear();network.snapshotSeq=0;network.lastSnapshotSeq=0;
   generateObstacles();state.players=network.active?prepareOnlinePlayers():createPlayers(nick);state.bombs=[];state.captures=0;state.target=Math.ceil((state.players.length-1)/2);state.winner=null;state.phase='countdown';state.countdownEndsAt=performance.now()+2400;paintTemplate();els.lobby.classList.add('hidden');els.result.classList.add('hidden');sendSnapshot();
   let count=3;els.countdown.textContent=count;els.countdown.classList.add('show');render();const round=state.roundId;
   const tick=setInterval(()=>{if(round!==state.roundId){clearInterval(tick);return}count--;if(count>0)els.countdown.textContent=count;else{clearInterval(tick);els.countdown.textContent='GO';setTimeout(()=>{if(round===state.roundId)els.countdown.classList.remove('show')},450);state.phase='playing';state.startedAt=performance.now();state.endsAt=state.startedAt+state.duration*1000;state.players.forEach(p=>{if(p.role==='seeker')p.seekerActiveAt=state.startedAt});announce('게임이 시작되었습니다. 들키지 마세요.');sendSnapshot();render() }},800);
@@ -160,7 +160,11 @@ function capture(victims,owner,method,now){
 }
 
 function resolveContact(mover,now){
-  const same=state.players.filter(p=>p.row===mover.row&&p.col===mover.col);const seekers=same.filter(p=>p.role==='seeker'&&now>=p.seekerActiveAt);const victims=same.filter(p=>p.role==='runner');if(seekers.length&&victims.length)capture(victims,mover.role==='seeker'?mover:seekers[0],'contact',now)
+  // Only a seeker entering a runner's cell can trigger contact capture. This
+  // prevents an unrelated runner move from re-resolving a shared cell.
+  if(mover.role!=='seeker'||now<mover.seekerActiveAt)return;
+  const victims=state.players.filter(p=>p.role==='runner'&&p.row===mover.row&&p.col===mover.col);
+  if(victims.length)capture(victims,mover,'contact',now)
 }
 
 function placeBomb(player,now){
@@ -190,7 +194,7 @@ function finish(winner,reason){
 
 function showResult(reason){const me=local()||{score:0};const now=performance.now();$('#resultTitle').textContent=state.winner==='seekers'?'술래 팀 승리':'도망자 팀 승리';$('#resultCopy').textContent=`${reason||'게임 종료'} · ${state.captures}명 포획`;$('#scoreGrid').innerHTML=`<div><strong>${me.score}</strong><span>내 점수</span></div><div><strong>${state.captures}</strong><span>총 포획</span></div><div><strong>${formatTime(Math.max(0,(now-state.startedAt)/1000))}</strong><span>플레이 시간</span></div>`;setTimeout(()=>els.result.classList.remove('hidden'),380)}
 
-function visibleToMe(p){const me=local();if(!me||p.local||me.role==='seeker'||state.difficulty==='easy')return true;return distance(me,p)<=DIFFICULTY[state.difficulty].vision}
+function visibleToMe(p){const me=local();if(!me||p.local||me.role==='seeker'||p.role==='seeker')return true;return distance(me,p)<=DIFFICULTY[state.difficulty].vision}
 
 function renderGrid(){
   for(const el of cells.values())el.querySelectorAll('.player-stack,.bomb').forEach(x=>x.remove());const groups=new Map();
@@ -224,7 +228,8 @@ function showCaptureEvent(event){
 function loop(now){
   if(state.phase==='countdown'&&!network.isHost&&network.active){const left=Math.max(0,state.countdownEndsAt-now);els.countdown.textContent=left>0?Math.max(1,Math.ceil(left/800)):'GO';els.countdown.classList.add('show');render()}
   if(state.phase==='playing'){
-    const direction=input.keys.at(-1);if(direction&&now-input.lastSent>=state.speed)dispatchMove(direction,now);
+    // Movement is discrete: a key press moves once. Holding a key must not
+    // generate repeat steps, which also made network snapshots appear to jump.
     if(!network.active||network.isHost){if(!network.active)state.players.filter(p=>!p.local).forEach(p=>botStep(p,now));state.bombs.filter(b=>!b.resolved&&now>=b.explodesAt).forEach(b=>explodeBomb(b,now));state.bombs=state.bombs.filter(b=>!b.resolved||now-b.explodesAt<500);if(now>=state.endsAt)finish('runners','제한 시간 생존')}
     els.timer.textContent=formatTime((state.endsAt-now)/1000);render();
   }
@@ -233,8 +238,8 @@ function loop(now){
 }
 
 const keyDirection=e=>({ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'})[e.code]||({ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'})[e.key];
-document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e);if(d&&state.phase==='playing'){e.preventDefault();const firstPress=!input.keys.includes(d);input.keys=input.keys.filter(x=>x!==d);input.keys.push(d);if(firstPress)dispatchMove(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
-document.addEventListener('keyup',e=>{const d=keyDirection(e);if(d)input.keys=input.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>input.keys=[]);
+document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e);if(d&&state.phase==='playing'){e.preventDefault();if(!e.repeat&&!input.pressed.has(e.code||d)){input.pressed.add(e.code||d);dispatchMove(d)}}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(!e.repeat){if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
+document.addEventListener('keyup',e=>{if(e.code)input.pressed.delete(e.code)});window.addEventListener('blur',()=>input.pressed.clear());
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.target.blur()} });
 $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;if(network.active&&!network.isHost)network.command?.send({type:'chat',text},{target:network.hostPeer});else{appendChat(local()?.name||'나',text);if(network.active)network.chat?.send({name:local()?.name||'방장',text})}input.value='';input.blur()});
 $('#roomCodeInput').addEventListener('input',e=>e.target.value=e.target.value.toUpperCase().replace(/[^A-Z2-9]/g,'').slice(0,6));
