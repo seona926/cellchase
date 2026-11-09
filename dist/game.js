@@ -1,0 +1,159 @@
+const COLS=20,ROWS=18,BOMB_FUSE=1500,BOMB_COOLDOWN=8000,NEW_SEEKER_GRACE=1500;
+const DIFFICULTY={easy:{ratio:.05,vision:Infinity,bot:340},medium:{ratio:.12,vision:5,bot:240},hard:{ratio:.2,vision:3,bot:155}};
+const BOT_NAMES=['민지','도윤','서준','하린','유나','지후','수아','현우','지민'];
+const $=s=>document.querySelector(s);
+const els={grid:$('#sheetGrid'),lobby:$('#lobbyModal'),result:$('#resultModal'),timer:$('#timer'),playerList:$('#playerList'),playerCount:$('#playerCount'),goal:$('#captureGoal'),progress:$('#captureProgress'),mode:$('#modeLabel'),countdown:$('#countdown'),bombStatus:$('#bombStatus'),bombCooldown:$('#bombCooldown'),toast:$('#toast'),chat:$('#chatLog'),nameBox:$('#nameBox'),formula:$('#formulaBox')};
+const templates={
+ sales:{title:'월간 매출 현황',file:'월간_매출현황_최종_v7.xlsx',heads:['구분','1월','2월','3월','1분기','전년비'],rows:['온라인','강남점','성수점','부산점','법인영업','해외영업','합계'],values:['₩ 24,800','₩ 31,420','₩ 27,950','₩ 84,170','+12.4%']},
+ estimate:{title:'거래처 견적서',file:'견적서_야근방지연구소.xlsx',heads:['품목','규격','수량','단가','공급가액','비고'],rows:['클라우드 이용권','협업 도구','보안 점검','유지보수','커피 정기배송','총 견적'],values:['10 EA','₩ 120,000','₩ 1,200,000','별도 협의']},
+ inventory:{title:'재고 관리대장',file:'재고관리_11월.xlsx',heads:['상품코드','상품명','입고','출고','현재고','상태'],rows:['A-1024','B-2048','C-4096','D-0815','E-1120','합계'],values:['모니터암','키보드','노트북 거치대','커피 원두','충분']},
+ schedule:{title:'직원 근무 일정표',file:'근무일정_공유용.xlsx',heads:['이름','월','화','수','목','금'],rows:['김민지','이도윤','박서준','최하린','정유나','비고'],values:['09:00','재택','휴가','18:00','당직']},
+ project:{title:'프로젝트 예산 현황',file:'프로젝트_예산_진행현황.xlsx',heads:['프로젝트','담당','예산','집행액','진행률','상태'],rows:['오로라','셀피하기','제우스','블루문','아틀라스','합계'],values:['₩ 45,000','₩ 28,500','63%','진행 중']}
+};
+
+let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,target:2,duration:180,endsAt:0,startedAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null};
+let cells=new Map(),raf=0,toastTimer=0;
+const coord=(r,c)=>`${r}:${c}`;
+const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+const distance=(a,b)=>Math.abs(a.row-b.row)+Math.abs(a.col-b.col);
+const local=()=>state.players.find(p=>p.local);
+const seekerCount=()=>state.players.filter(p=>p.role==='seeker').length;
+const runners=()=>state.players.filter(p=>p.role==='runner');
+
+function buildGrid(){
+  els.grid.textContent='';cells.clear();
+  const corner=document.createElement('div');corner.className='cell header-cell corner';els.grid.append(corner);
+  for(let c=0;c<COLS;c++){const el=document.createElement('div');el.className='cell header-cell';el.textContent=String.fromCharCode(65+c);els.grid.append(el)}
+  for(let r=0;r<ROWS;r++){
+    const h=document.createElement('div');h.className='cell header-cell';h.textContent=r+1;els.grid.append(h);
+    for(let c=0;c<COLS;c++){const el=document.createElement('div');el.className='cell data-cell';el.dataset.row=r;el.dataset.col=c;els.grid.append(el);cells.set(coord(r,c),el)}
+  }
+}
+
+function paintTemplate(){
+  const t=templates[state.template];document.querySelector('.file-title').textContent=t.file;document.querySelector('.sheet-tab').textContent=t.title;
+  for(const [key,el] of cells){const [r,c]=key.split(':').map(Number);el.className='cell data-cell';let text='';
+    if(r===1&&c===1){text=t.title;el.classList.add('report-title')}
+    else if(r===3&&c>=1&&c<=6){text=t.heads[c-1];el.classList.add('report-head')}
+    else if(r>=4&&r<=10&&c>=1&&c<=6){text=c===1?(t.rows[r-4]||''):t.values[(r+c)%t.values.length];if(c>=3)el.classList.add('money');if(r===10)el.classList.add('total')}
+    else if((r===13&&c>=2&&c<=8)||(r===14&&c>=2&&c<=5)){text=['담당자','검토 완료','※ 내부 공유용','2026-11-09'][c%4]||''}
+    el.textContent=text;if(state.blocked.has(key))el.classList.add('blocked')
+  }
+}
+
+function isConnected(blocked){
+  let start;for(let r=0;r<ROWS&&!start;r++)for(let c=0;c<COLS;c++)if(!blocked.has(coord(r,c))){start=[r,c];break}
+  const seen=new Set([coord(...start)]),q=[start];
+  while(q.length){const [r,c]=q.shift();for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){const nr=r+dr,nc=c+dc,k=coord(nr,nc);if(nr>=0&&nr<ROWS&&nc>=0&&nc<COLS&&!blocked.has(k)&&!seen.has(k)){seen.add(k);q.push([nr,nc])}}}
+  return seen.size===ROWS*COLS-blocked.size;
+}
+
+function generateObstacles(){
+  const wanted=Math.floor(ROWS*COLS*DIFFICULTY[state.difficulty].ratio);let best=new Set();
+  for(let attempt=0;attempt<25;attempt++){const set=new Set();while(set.size<wanted){const r=Math.floor(Math.random()*ROWS),c=Math.floor(Math.random()*COLS);if((r<2&&c<2)||(r>ROWS-3&&c>COLS-3))continue;set.add(coord(r,c))}if(isConnected(set)){best=set;break}}
+  state.blocked=best;
+}
+
+function randomFree(used=[],farFrom=null){
+  const occupied=new Set(used.map(p=>coord(p.row,p.col)));let options=[];
+  for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++)if(!state.blocked.has(coord(r,c))&&!occupied.has(coord(r,c))&&(!farFrom||Math.abs(r-farFrom.row)+Math.abs(c-farFrom.col)>=8))options.push({row:r,col:c});
+  if(!options.length&&farFrom)return randomFree(used);return options[Math.floor(Math.random()*options.length)];
+}
+
+function createPlayers(name){
+  const names=[name||'나',...BOT_NAMES.slice(0,4)];const players=[];
+  names.forEach((n,i)=>{const pos=randomFree(players);players.push({id:`p${i}`,name:n,row:pos.row,col:pos.col,role:'runner',local:i===0,score:0,caughtAt:null,seekerActiveAt:0,lastMove:0,bombReady:0,botMove:0})});
+  const chosen=players[Math.floor(Math.random()*players.length)];chosen.role='seeker';chosen.seekerActiveAt=performance.now();
+  const seekerPos={row:chosen.row,col:chosen.col};for(const p of players){if(p!==chosen){const pos=randomFree(players.filter(x=>x!==p),seekerPos);p.row=pos.row;p.col=pos.col}}
+  return players;
+}
+
+function startGame(reuse=false){
+  const nick=$('#nickname').value.trim().slice(0,10)||'나';state.template=$('#templateSelect').value;state.difficulty=$('#difficultySelect').value;state.duration=Number($('#durationSelect').value);state.speed=Number($('#speedSelect').value);state.roundId++;
+  generateObstacles();state.players=createPlayers(nick);state.bombs=[];state.captures=0;state.target=Math.ceil((state.players.length-1)/2);state.winner=null;state.phase='countdown';paintTemplate();els.lobby.classList.add('hidden');els.result.classList.add('hidden');
+  let count=3;els.countdown.textContent=count;els.countdown.classList.add('show');render();const round=state.roundId;
+  const tick=setInterval(()=>{if(round!==state.roundId){clearInterval(tick);return}count--;if(count>0)els.countdown.textContent=count;else{clearInterval(tick);els.countdown.textContent='GO';setTimeout(()=>{if(round===state.roundId)els.countdown.classList.remove('show')},450);state.phase='playing';state.startedAt=performance.now();state.endsAt=state.startedAt+state.duration*1000;state.players.forEach(p=>{if(p.role==='seeker')p.seekerActiveAt=state.startedAt});announce('게임이 시작되었습니다. 들키지 마세요.');render() }},800);
+}
+
+function tryMove(player,dr,dc,now){
+  if(state.phase!=='playing'||now-player.lastMove<state.speed)return false;if(player.role==='seeker'&&now<player.seekerActiveAt)return false;
+  const nr=player.row+dr,nc=player.col+dc,k=coord(nr,nc);if(nr<0||nr>=ROWS||nc<0||nc>=COLS||state.blocked.has(k))return false;
+  player.row=nr;player.col=nc;player.lastMove=now;resolveContact(player,now);return true;
+}
+
+function capture(victims,owner,method,now){
+  const fresh=victims.filter(p=>p.role==='runner');if(!fresh.length)return;
+  for(const p of fresh){p.role='seeker';p.caughtAt=now;p.seekerActiveAt=now+NEW_SEEKER_GRACE;p.bombReady=now+NEW_SEEKER_GRACE;p.score+=Math.floor((now-state.startedAt)/1000);state.captures++;if(owner)owner.score+=method==='bomb'?40:60;announce(`${p.name}님이 술래가 되었습니다.`)}
+  if(state.captures>=state.target)finish('seekers','포획 목표 달성');
+}
+
+function resolveContact(mover,now){
+  const same=state.players.filter(p=>p.row===mover.row&&p.col===mover.col);const seekers=same.filter(p=>p.role==='seeker'&&now>=p.seekerActiveAt);const victims=same.filter(p=>p.role==='runner');if(seekers.length&&victims.length)capture(victims,mover.role==='seeker'?mover:seekers[0],'contact',now)
+}
+
+function placeBomb(player,now){
+  if(state.phase!=='playing'||player.role!=='seeker'||now<player.seekerActiveAt||now<player.bombReady||state.bombs.some(b=>b.owner===player.id&&!b.resolved)){if(player.local&&player.role!=='seeker')notify('폭탄은 술래만 사용할 수 있습니다.');return}
+  state.bombs.push({id:crypto.randomUUID(),owner:player.id,row:player.row,col:player.col,explodesAt:now+BOMB_FUSE,resolved:false});player.bombReady=now+BOMB_COOLDOWN;notify('폭탄 설치 · 1.5초');
+}
+
+function explodeBomb(b,now){
+  b.resolved=true;const ranges=[[b.row,b.col],[b.row-1,b.col],[b.row+1,b.col],[b.row,b.col-1],[b.row,b.col+1]].filter(([r,c])=>r>=0&&r<ROWS&&c>=0&&c<COLS&&!state.blocked.has(coord(r,c)));const keys=new Set(ranges.map(x=>coord(...x)));for(const k of keys){const el=cells.get(k);if(el){el.classList.add('blast');setTimeout(()=>el.classList.remove('blast'),360)}}const victims=state.players.filter(p=>p.role==='runner'&&keys.has(coord(p.row,p.col)));capture(victims,state.players.find(p=>p.id===b.owner),'bomb',now)
+}
+
+function botStep(p,now){
+  if(now<p.botMove||state.phase!=='playing')return;p.botMove=now+DIFFICULTY[state.difficulty].bot+Math.random()*80;
+  const targets=p.role==='seeker'?runners():state.players.filter(x=>x.role==='seeker');if(!targets.length)return;const near=targets.reduce((a,b)=>distance(p,a)<distance(p,b)?a:b);
+  if(p.role==='seeker'&&distance(p,near)<=1&&Math.random()<.18)placeBomb(p,now);
+  const choices=[[1,0],[-1,0],[0,1],[0,-1]].map(([dr,dc])=>({dr,dc,row:p.row+dr,col:p.col+dc})).filter(x=>x.row>=0&&x.row<ROWS&&x.col>=0&&x.col<COLS&&!state.blocked.has(coord(x.row,x.col)));
+  choices.sort((a,b)=>{const da=Math.abs(a.row-near.row)+Math.abs(a.col-near.col),db=Math.abs(b.row-near.row)+Math.abs(b.col-near.col);return p.role==='seeker'?da-db:db-da});if(choices[0])tryMove(p,choices[0].dr,choices[0].dc,now)
+}
+
+function finish(winner,reason){
+  if(state.phase==='finished')return;state.phase='finished';state.winner=winner;const now=performance.now();for(const p of state.players){if(p.role==='runner')p.score+=Math.floor((now-state.startedAt)/1000);if((winner==='seekers'&&p.role==='seeker')||(winner==='runners'&&p.role==='runner'))p.score+=100}
+  state.bombs=[];const me=local();$('#resultTitle').textContent=winner==='seekers'?'술래 팀 승리':'도망자 팀 승리';$('#resultCopy').textContent=`${reason} · ${state.captures}명 포획`;
+  $('#scoreGrid').innerHTML=`<div><strong>${me.score}</strong><span>내 점수</span></div><div><strong>${state.captures}</strong><span>총 포획</span></div><div><strong>${formatTime(Math.max(0,(now-state.startedAt)/1000))}</strong><span>플레이 시간</span></div>`;
+  setTimeout(()=>els.result.classList.remove('hidden'),380);render();
+}
+
+function visibleToMe(p){const me=local();if(!me||p.local||me.role==='seeker'||state.difficulty==='easy')return true;return distance(me,p)<=DIFFICULTY[state.difficulty].vision}
+
+function renderGrid(){
+  for(const el of cells.values())el.querySelectorAll('.player-stack,.bomb').forEach(x=>x.remove());const groups=new Map();
+  for(const p of state.players.filter(visibleToMe)){const k=coord(p.row,p.col);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(p)}
+  for(const [k,ps] of groups){const el=cells.get(k);if(!el)continue;const main=ps.find(p=>p.local)||ps.find(p=>p.role==='seeker')||ps[0];const chip=document.createElement('div');chip.className=`player-stack ${main.role}${main.local?' self':''}`;chip.textContent=main.name;chip.title=ps.map(p=>`${p.name} (${p.role==='seeker'?'술래':'도망'})`).join(', ');if(ps.length>1){const count=document.createElement('span');count.className='stack-count';count.textContent=`+${ps.length-1}`;chip.append(count)}el.append(chip)}
+  for(const b of state.bombs.filter(x=>!x.resolved)){const el=cells.get(coord(b.row,b.col));if(el){const bomb=document.createElement('div');bomb.className='bomb';bomb.title='폭탄';el.append(bomb)}}
+  const me=local();if(me){els.nameBox.textContent=`${String.fromCharCode(65+me.col)}${me.row+1}`;els.formula.textContent=me.role==='seeker'?'=CHASE( runners )':`=SURVIVE( ${Math.max(0,Math.ceil((state.endsAt-performance.now())/1000))} )`}
+}
+
+function renderPlayers(){
+  els.playerList.textContent='';for(const p of [...state.players].sort((a,b)=>a.role.localeCompare(b.role))){const el=document.createElement('div');el.className=`player-item${p.local?' local':''}`;const dot=document.createElement('i');dot.className=`role-dot ${p.role}`;const name=document.createElement('span');name.className='name';name.textContent=p.name;const status=document.createElement('span');status.className='state';status.textContent=p.role==='seeker'?'술래':'도망';el.append(dot,name,status);els.playerList.append(el)}els.playerCount.textContent=`${state.players.length} / 10`;
+}
+
+function render(){
+  renderGrid();renderPlayers();els.goal.textContent=`${state.captures} / ${state.target}`;els.progress.style.width=`${state.target?state.captures/state.target*100:0}%`;els.mode.textContent=state.phase==='playing'?`${state.difficulty.toUpperCase()} · ${seekerCount()} 술래`:state.phase==='finished'?'게임 종료':'시작 준비';
+  const me=local(),now=performance.now();if(me){const ready=Math.max(0,me.bombReady-now);els.bombStatus.textContent=me.role!=='seeker'?'술래 전용':ready>0?`${(ready/1000).toFixed(1)}초`:'사용 가능';els.bombCooldown.style.width=`${ready?ready/BOMB_COOLDOWN*100:0}%`}
+}
+
+function formatTime(seconds){const s=Math.max(0,Math.ceil(seconds));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`}
+function announce(text){const p=document.createElement('p');p.className='system';p.textContent=text;els.chat.append(p);els.chat.scrollTop=els.chat.scrollHeight}
+function notify(text){clearTimeout(toastTimer);els.toast.textContent=text;els.toast.classList.add('show');toastTimer=setTimeout(()=>els.toast.classList.remove('show'),1500)}
+
+function loop(now){
+  if(state.phase==='playing'){
+    const direction=state.keys.at(-1);if(direction&&now-state.lastInput>=state.speed){const map={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]};tryMove(local(),...map[direction],now);state.lastInput=now}
+    state.players.filter(p=>!p.local).forEach(p=>botStep(p,now));state.bombs.filter(b=>!b.resolved&&now>=b.explodesAt).forEach(b=>explodeBomb(b,now));state.bombs=state.bombs.filter(b=>!b.resolved||now-b.explodesAt<500);
+    if(now>=state.endsAt)finish('runners','제한 시간 생존');els.timer.textContent=formatTime((state.endsAt-now)/1000);render();
+  }
+  raf=requestAnimationFrame(loop);
+}
+
+const keyDirection=k=>({ArrowUp:'up',w:'up',W:'up',ArrowDown:'down',s:'down',S:'down',ArrowLeft:'left',a:'left',A:'left',ArrowRight:'right',d:'right',D:'right'})[k];
+document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e.key);if(d&&state.phase==='playing'){e.preventDefault();state.keys=state.keys.filter(x=>x!==d);state.keys.push(d)}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();placeBomb(local(),performance.now())}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
+document.addEventListener('keyup',e=>{const d=keyDirection(e.key);if(d)state.keys=state.keys.filter(x=>x!==d)});window.addEventListener('blur',()=>state.keys=[]);
+$('#chatInput').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.target.blur()} });
+$('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;const p=document.createElement('p'),b=document.createElement('b');b.textContent=`${local()?.name||'나'} `;p.append(b,document.createTextNode(text));els.chat.append(p);els.chat.scrollTop=els.chat.scrollHeight;input.value='';input.blur()});
+$('#quickStart').addEventListener('click',()=>startGame());$('#createRoom').addEventListener('click',()=>{notify('방 코드 K7M2Q가 생성되었습니다. 데모에서는 봇이 참가합니다.');startGame()});$('#joinRoom').addEventListener('click',()=>notify('공개 MVP에서는 빠른 시작을 이용해주세요.'));
+$('#playAgain').addEventListener('click',()=>startGame(true));$('#backToLobby').addEventListener('click',()=>{state.phase='lobby';state.roundId++;els.result.classList.add('hidden');els.lobby.classList.remove('hidden')});
+$('#collapsePanel').addEventListener('click',()=>notify('게임 정보 패널은 모든 참가자에게 동일하게 표시됩니다.'));
+
+buildGrid();generateObstacles();paintTemplate();state.players=[{id:'preview-self',name:'나',row:8,col:7,role:'runner',local:true,score:0,bombReady:0},{id:'preview-seeker',name:'민지',row:12,col:13,role:'seeker',score:0,bombReady:0},{id:'preview-2',name:'도윤',row:5,col:15,role:'runner',score:0,bombReady:0},{id:'preview-3',name:'서준',row:14,col:4,role:'runner',score:0,bombReady:0},{id:'preview-4',name:'하린',row:3,col:10,role:'runner',score:0,bombReady:0}];render();raf=requestAnimationFrame(loop);
