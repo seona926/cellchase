@@ -32,7 +32,7 @@ const publicOrigin=location.hostname==='127.0.0.1'||location.hostname==='localho
 let turnServersPromise=null;
 
 function roomCode(){const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';return Array.from({length:6},()=>chars[Math.floor(Math.random()*chars.length)]).join('')}
-function playerRecord(id,name,isLocal=false){return{id,name:name.slice(0,10)||'게스트',row:0,col:0,role:'runner',local:isLocal,score:0,caughtAt:null,seekerActiveAt:0,lastMove:0,bombReady:0,botMove:0,connected:true}}
+function playerRecord(id,name,isLocal=false){return{id,name:name.slice(0,10)||'게스트',row:0,col:0,role:'runner',local:isLocal,score:0,caughtAt:null,seekerActiveAt:0,lastMove:0,bombReadyAt:0,bombReady:0,botMove:0,connected:true}}
 function snapshotData(){const now=performance.now();return{now,seq:++network.snapshotSeq,state:{...state,blocked:[...state.blocked],keys:[],players:state.players.map(({local,...p})=>p)}}}
 function sendSnapshot(target){if(!network.active||!network.isHost||!network.snapshot)return;network.snapshot.send(snapshotData(),target?{target}:undefined)}
 function applySnapshot(packet){
@@ -148,6 +148,11 @@ function tryMove(player,dr,dc,now){
   const nr=player.row+dr,nc=player.col+dc,k=coord(nr,nc);if(nr<0||nr>=ROWS||nc<0||nc>=COLS||state.blocked.has(k))return false;
   player.row=nr;player.col=nc;player.lastMove=now;resolveContact(player,now);return true;
 }
+function setPlayerRole(player,role,now){
+  player.role=role;
+  if(role==='seeker'){player.caughtAt=now;player.seekerActiveAt=now+NEW_SEEKER_GRACE;player.bombReadyAt=now+BOMB_COOLDOWN;player.bombReady=now+BOMB_COOLDOWN}
+  else{player.caughtAt=null;player.seekerActiveAt=0;player.bombReadyAt=0;player.bombReady=0}
+}
 function dispatchMove(direction,now=performance.now()){
   const map={up:[-1,0],down:[1,0],left:[0,-1],right:[0,1]},delta=map[direction];if(!delta||state.phase!=='playing')return;
   if(network.active&&!network.isHost)network.command?.send({type:'move',direction},{target:network.hostPeer});else tryMove(local(),...delta,now);input.lastSent=now
@@ -155,8 +160,10 @@ function dispatchMove(direction,now=performance.now()){
 
 function capture(victims,owner,method,now){
   const fresh=victims.filter(p=>p.role==='runner');if(!fresh.length)return;
-  for(const p of fresh){p.role='seeker';p.caughtAt=now;p.seekerActiveAt=now+NEW_SEEKER_GRACE;p.bombReadyAt=now+BOMB_COOLDOWN;p.bombReady=now+BOMB_COOLDOWN;p.score+=Math.floor((now-state.startedAt)/1000);state.captures++;if(owner)owner.score+=method==='bomb'?40:60}
-  const event={type:'capture',method,ownerName:owner?.name||'술래',victims:fresh.map(p=>({id:p.id,name:p.name,row:p.row,col:p.col}))};showCaptureEvent(event);if(network.active&&network.isHost)network.event?.send(event);
+  const ownerWasSeeker=owner?.role==='seeker';
+  if(ownerWasSeeker)setPlayerRole(owner,'runner',now);
+  for(const p of fresh){setPlayerRole(p,'seeker',now);p.score+=Math.floor((now-state.startedAt)/1000);state.captures++;if(owner)owner.score+=method==='bomb'?40:60}
+  const event={type:'capture',method,ownerId:owner?.id||null,ownerName:owner?.name||'술래',ownerWasSeeker,victims:fresh.map(p=>({id:p.id,name:p.name,row:p.row,col:p.col}))};showCaptureEvent(event);if(network.active&&network.isHost)network.event?.send(event);
   if(state.captures>=state.target)finish('seekers','포획 목표 달성');
 }
 
@@ -219,11 +226,11 @@ function announce(text){const p=document.createElement('p');p.className='system'
 function appendChat(name,text){const p=document.createElement('p'),b=document.createElement('b');b.textContent=`${name} `;p.append(b,document.createTextNode(text));els.chat.append(p);els.chat.scrollTop=els.chat.scrollHeight}
 function notify(text){clearTimeout(toastTimer);els.toast.textContent=text;els.toast.classList.add('show');toastTimer=setTimeout(()=>els.toast.classList.remove('show'),1500)}
 function showCaptureEvent(event){
-  if(!event?.victims?.length)return;const me=local(),caughtMe=event.victims.some(v=>v.id===me?.id),count=event.victims.length,first=event.victims[0].name;const label=count>1?`${first} 외 ${count-1}명`:`${first}님`;const chatSubject=count>1?`${label}이`:`${first}님이`;const bomb=event.method==='bomb';
-  const title=caughtMe?(bomb?'폭탄에 잡혔습니다!':'술래에게 잡혔습니다!'):`${label} 술래!`;const subtitle=bomb?`${event.ownerName}님의 폭탄 · ${count>1?`${count}명 동시 포획`:'이제 술래입니다'}`:`${event.ownerName}님이 직접 잡았습니다`;
+  if(!event?.victims?.length)return;const me=local(),caughtMe=event.victims.some(v=>v.id===me?.id),ownerMe=event.ownerId===me?.id,swapped=Boolean(event.ownerWasSeeker),count=event.victims.length,first=event.victims[0].name;const label=count>1?`${first} 외 ${count-1}명`:`${first}님`;const chatSubject=count>1?`${label}이`:`${first}님이`,targetObject=count>1?`${label}을`:`${first}님을`;const bomb=event.method==='bomb';
+  const title=caughtMe?(bomb?'폭탄에 잡혔습니다!':'술래에게 잡혔습니다!'):swapped&&ownerMe?'도망자로 전환!':`${label} 술래!`;const subtitle=swapped?(ownerMe?`${label}을 잡아 도망자가 됐습니다`:`${event.ownerName}님은 도망자 · ${count>1?`${count}명 동시 포획`:'역할 교대'}`):bomb?`${event.ownerName}님의 폭탄 · ${count>1?`${count}명 동시 포획`:'이제 술래입니다'}`:`${event.ownerName}님이 직접 잡았습니다`;
   $('#captureIcon').textContent=bomb?'💥':'!';$('#captureTitle').textContent=title;$('#captureSubtitle').textContent=subtitle;const banner=$('#captureBanner');banner.classList.toggle('bomb',bomb);banner.classList.remove('hidden');banner.style.animation='none';void banner.offsetWidth;banner.style.animation='';clearTimeout(captureTimer);captureTimer=setTimeout(()=>banner.classList.add('hidden'),1150);
   for(const victim of event.victims){const cell=cells.get(coord(victim.row,victim.col));if(cell){cell.classList.remove('captured-flash');void cell.offsetWidth;cell.classList.add('captured-flash');setTimeout(()=>cell.classList.remove('captured-flash'),1000)}}
-  announce(bomb?`💥 ${chatSubject} ${event.ownerName}님의 폭탄에 잡혀 술래가 되었습니다!`:`${chatSubject} ${event.ownerName}님에게 잡혀 술래가 되었습니다!`);
+  announce(swapped?`${event.ownerName}님이 ${targetObject} 잡아 도망자가 되고, ${label}은 술래가 되었습니다.`:bomb?`💥 ${chatSubject} ${event.ownerName}님의 폭탄에 잡혀 술래가 되었습니다!`:`${chatSubject} ${event.ownerName}님에게 잡혀 술래가 되었습니다!`);
 }
 
 function loop(now){
