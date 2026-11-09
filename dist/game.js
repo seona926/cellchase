@@ -32,11 +32,13 @@ function applySnapshot(packet){
   state={...s,blocked:new Set(s.blocked),keys:[],startedAt:s.startedAt+offset,endsAt:s.endsAt+offset,countdownEndsAt:s.countdownEndsAt+offset,players:s.players.map(p=>({...p,local:p.id===network.playerId,seekerActiveAt:p.seekerActiveAt+offset,lastMove:p.lastMove+offset,bombReady:p.bombReady+offset})),bombs:s.bombs.map(b=>({...b,explodesAt:b.explodesAt+offset}))};
   if(previous!==state.phase&&state.phase==='countdown'){els.lobby.classList.add('hidden');els.result.classList.add('hidden');els.countdown.classList.add('show')}
   if(state.phase==='playing')els.countdown.classList.remove('show');
-  if(state.phase==='finished'&&previous!=='finished')showResult();paintTemplate();render();
+  if(state.phase==='finished'&&previous!=='finished')showResult();if(state.phase==='lobby')updateRoomLobby();paintTemplate();render();
 }
 function updateRoomLobby(message=''){
-  const box=$('#roomLobbyStatus');box.classList.remove('hidden');const count=state.players.length;
+  const box=$('#roomLobbyStatus');box.classList.remove('hidden');const count=state.players.filter(p=>p.connected!==false).length;
   box.textContent=message||`방 코드 ${network.code} · ${count}/10명 연결${network.isHost?(count<2?' · 친구를 기다리는 중':' · 게임 시작 가능'):' · 방장의 시작을 기다리는 중'}`;
+  const list=$('#roomPlayerList');list.classList.remove('hidden');list.textContent='';const hostId=network.isHost?network.playerId:network.hostPeer;
+  for(const player of state.players){const row=document.createElement('div');row.className=`room-player${player.connected===false?' disconnected':''}`;const dot=document.createElement('i');dot.className='room-player-dot';const name=document.createElement('span');name.className='room-player-name';name.textContent=player.name;row.append(dot,name);if(player.id===hostId){const badge=document.createElement('span');badge.className='room-player-badge';badge.textContent='👑 방장';row.append(badge)}const status=document.createElement('span');status.className='room-player-state';status.textContent=player.connected===false?'재접속 중':player.id===network.playerId?'나':'접속됨';row.append(status);list.append(row)}
   $('#quickStart').textContent=network.isHost?'게임 시작':'방장 시작 대기';$('#quickStart').disabled=!network.isHost||count<2;
   $('#connectionState').textContent=network.active?`WebRTC · 방 ${network.code}`:'로컬 데모 · 연결됨';
 }
