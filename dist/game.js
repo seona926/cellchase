@@ -236,8 +236,7 @@ function showCaptureEvent(event){
 function loop(now){
   if(state.phase==='countdown'&&!network.isHost&&network.active){const left=Math.max(0,state.countdownEndsAt-now);els.countdown.textContent=left>0?Math.max(1,Math.ceil(left/800)):'GO';els.countdown.classList.add('show');render()}
   if(state.phase==='playing'){
-    // Movement is discrete: a key press moves once. Holding a key must not
-    // generate repeat steps, which also made network snapshots appear to jump.
+    stepKeyboardMove(now);
     if(!network.active||network.isHost){if(!network.active)state.players.filter(p=>!p.local).forEach(p=>botStep(p,now));state.bombs.filter(b=>!b.resolved&&now>=b.explodesAt).forEach(b=>explodeBomb(b,now));state.bombs=state.bombs.filter(b=>!b.resolved||now-b.explodesAt<500);if(now>=state.endsAt)finish('runners','제한 시간 생존')}
     els.timer.textContent=formatTime((state.endsAt-now)/1000);render();
   }
@@ -245,9 +244,12 @@ function loop(now){
   raf=requestAnimationFrame(loop);
 }
 
-const keyDirection=e=>({ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'})[e.code]||({ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'})[e.key];
-document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e);if(d&&state.phase==='playing'){e.preventDefault();if(!e.repeat&&!input.pressed.has(e.code||d)){input.pressed.add(e.code||d);dispatchMove(d)}}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(!e.repeat){if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();$('#chatInput').focus()}});
-document.addEventListener('keyup',e=>{if(e.code)input.pressed.delete(e.code)});window.addEventListener('blur',()=>input.pressed.clear());
+const keyDirections={ArrowUp:'up',KeyW:'up',ArrowDown:'down',KeyS:'down',ArrowLeft:'left',KeyA:'left',ArrowRight:'right',KeyD:'right'};
+const keyDirection=e=>keyDirections[e.code]||({ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'})[e.key];
+function clearKeyboardMove(){input.pressed.clear();input.keys.length=0}
+function stepKeyboardMove(now){const key=input.keys[input.keys.length-1],direction=keyDirections[key];if(!direction||state.phase!=='playing')return;const interval=Math.max(60,state.speed);if(now-input.lastSent>=interval)dispatchMove(direction,now)}
+document.addEventListener('keydown',e=>{const form=e.target.matches('input,select,textarea,[contenteditable]');if(form)return;const d=keyDirection(e);if(d&&state.phase==='playing'){e.preventDefault();const key=e.code||d;if(!input.pressed.has(key)){input.pressed.add(key);input.keys.push(key);dispatchMove(d)}}if(e.code==='Space'&&state.phase==='playing'){e.preventDefault();if(!e.repeat){if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())}}if(e.key==='Enter'&&state.phase==='playing'){e.preventDefault();clearKeyboardMove();$('#chatInput').focus()}});
+document.addEventListener('keyup',e=>{if(!e.code)return;input.pressed.delete(e.code);input.keys=input.keys.filter(key=>key!==e.code);if(input.keys.length)input.lastSent=performance.now()-Math.max(60,state.speed)});window.addEventListener('blur',clearKeyboardMove);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearKeyboardMove()});
 const gridWrap=$('#gridWrap');
 function keepLocalVisible(){if(!matchMedia('(max-width: 700px)').matches||state.phase==='lobby'||state.phase==='finished')return;const me=local(),cell=me&&cells.get(coord(me.row,me.col));if(!cell)return;const a=cell.getBoundingClientRect(),b=gridWrap.getBoundingClientRect(),pad=48;if(a.right<b.left||a.left>b.right||a.bottom<b.top||a.top>b.bottom){gridWrap.scrollLeft+=a.left-b.left-(b.width-a.width)/2;gridWrap.scrollTop+=a.top-b.top-(b.height-a.height)/2;return}if(a.left<b.left+pad)gridWrap.scrollLeft-=b.left+pad-a.left;else if(a.right>b.right-pad)gridWrap.scrollLeft+=a.right-(b.right-pad);if(a.top<b.top+pad)gridWrap.scrollTop-=b.top+pad-a.top;else if(a.bottom>b.bottom-pad)gridWrap.scrollTop+=a.bottom-(b.bottom-pad)}
 function clearTouchMove(){touchMove.pointerId=null;touchMove.direction=null;touchMove.wanted=0;touchMove.sent=0;if(touchMove.raf)cancelAnimationFrame(touchMove.raf);touchMove.raf=0;touchMove.joystick?.remove();touchMove.joystick=null}
