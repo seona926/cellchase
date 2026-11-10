@@ -56,7 +56,7 @@
           <section class="game-summary">
             <div class="summary-top"><span class="live-dot"></span><strong id="modeLabel">대기실</strong><button id="collapsePanel" aria-label="패널 접기">›</button></div>
             <div class="timer" id="timer">03:00</div>
-            <div class="goal"><span>포획 목표</span><strong id="captureGoal">0 / 2</strong></div>
+            <div class="goal"><span>내 술래 시간</span><strong id="captureGoal">00:00</strong></div>
             <div class="progress"><i id="captureProgress"></i></div>
           </section>
 
@@ -91,17 +91,17 @@
       <section class="lobby-card" aria-labelledby="lobbyTitle">
         <div class="lobby-brand"><div class="logo-cell">S</div><div><small>SPREADSHEET CHASE</small><h1 id="lobbyTitle">셀피하기</h1></div></div>
         <p class="tagline">보고서 안에서 조용히 도망치세요.</p>
-        <label>닉네임<input id="nickname" maxlength="10" value="나" placeholder="최대 10자" /></label>
+        <label>닉네임<input id="nickname" maxlength="10" value="나" placeholder="최대 10자" /><small class="nickname-hint hidden" id="inviteNicknameHint">자동 설정된 닉네임은 입장 후에도 수정할 수 있습니다.</small></label>
         <label class="room-code-field">방 코드<input id="roomCodeInput" maxlength="6" placeholder="친구에게 받은 6자리 코드" autocapitalize="characters" /></label>
         <div class="option-grid">
           <label>문서<select id="templateSelect"><option value="sales">월간 매출 현황</option><option value="estimate">거래처 견적서</option><option value="inventory">재고 관리대장</option><option value="schedule">직원 근무 일정표</option><option value="project">프로젝트 예산 현황</option></select></label>
           <label>난이도<select id="difficultySelect"><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option></select></label>
-          <label>게임 시간<select id="durationSelect"><option value="120">2분</option><option value="180" selected>3분</option><option value="240">4분</option><option value="300">5분</option></select></label>
+          <label>게임 시간<select id="durationSelect"><option value="auto" selected>자동 · 4분 (5명)</option><option value="120">2분</option><option value="180">3분</option><option value="240">4분</option><option value="300">5분</option></select></label>
           <label>이동 속도<select id="speedSelect"><option value="140">느림</option><option value="100" selected>보통</option><option value="75">빠름</option></select></label>
         </div>
         <div class="room-lobby-status hidden" id="roomLobbyStatus" aria-live="polite"></div>
         <div class="room-player-list hidden" id="roomPlayerList" aria-label="로비 참가자"></div>
-        <button class="invite-copy hidden" id="copyInviteLink" type="button">초대 링크 복사</button>
+        <div class="invite-copy-wrap hidden" id="inviteCopyWrap"><button class="invite-copy" id="copyInviteLink" type="button">초대 링크 복사</button><span class="copy-tooltip" id="copyTooltip" role="status">링크가 복사되었습니다</span></div>
         <button class="primary-button" id="quickStart">봇과 빠른 시작</button>
         <div class="room-actions"><button id="createRoom">방 만들기</button><button id="joinRoom">코드로 참가</button></div>
         <p class="privacy-note">게스트 모드 · 친구 대전은 WebRTC로 브라우저끼리 직접 연결됩니다.</p>
@@ -109,7 +109,7 @@
     </div>
 
     <div class="result-backdrop hidden" id="resultModal">
-      <section class="result-card"><small>GAME OVER</small><h2 id="resultTitle">도망자 승리</h2><p id="resultCopy"></p><div class="score-grid" id="scoreGrid"></div><button class="primary-button" id="playAgain">같은 설정으로 재경기</button><button class="text-button" id="backToLobby">설정 변경</button></section>
+      <section class="result-card"><small>GAME OVER</small><h2 id="resultTitle">최종 순위</h2><p id="resultCopy"></p><div class="score-grid ranking" id="scoreGrid"></div><button class="primary-button" id="playAgain">같은 설정으로 재경기</button><button class="text-button" id="backToLobby">설정 변경</button></section>
     </div>
 
     <div class="toast" id="toast" role="status"></div>
