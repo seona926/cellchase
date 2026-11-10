@@ -89,6 +89,7 @@
 
     <div class="modal-backdrop" id="lobbyModal">
       <section class="lobby-card" aria-labelledby="lobbyTitle">
+        <div class="lobby-main">
         <div class="lobby-brand"><div class="logo-cell">S</div><div><small>SPREADSHEET CHASE</small><h1 id="lobbyTitle">셀피하기</h1></div></div>
         <p class="tagline">보고서 안에서 조용히 도망치세요.</p>
         <label>닉네임<input id="nickname" maxlength="10" value="나" placeholder="최대 10자" /><small class="nickname-hint hidden" id="inviteNicknameHint">자동 설정된 닉네임은 입장 후에도 수정할 수 있습니다.</small></label>
@@ -105,6 +106,12 @@
         <button class="primary-button" id="quickStart">봇과 빠른 시작</button>
         <div class="room-actions"><button id="createRoom">방 만들기</button><button id="joinRoom">코드로 참가</button></div>
         <p class="privacy-note">게스트 모드 · 친구 대전은 WebRTC로 브라우저끼리 직접 연결됩니다.</p>
+        </div>
+        <aside class="open-rooms-panel" aria-labelledby="openRoomsTitle">
+          <div class="open-rooms-heading"><div><small>LIVE ROOMS</small><h2 id="openRoomsTitle">열려 있는 방</h2></div><span id="openRoomCount">0</span></div>
+          <p class="open-rooms-copy">대기 중인 방에 바로 참가할 수 있습니다.</p>
+          <div class="open-room-list" id="openRoomList" aria-live="polite"><p class="open-room-empty">열린 방을 찾는 중입니다…</p></div>
+        </aside>
       </section>
     </div>
 
