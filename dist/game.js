@@ -6,11 +6,11 @@ const BOT_NAMES=['민지','도윤','서준','하린','유나','지후','수아',
 const $=s=>document.querySelector(s);
 const els={grid:$('#sheetGrid'),lobby:$('#lobbyModal'),result:$('#resultModal'),timer:$('#timer'),playerList:$('#playerList'),playerCount:$('#playerCount'),goal:$('#captureGoal'),progress:$('#captureProgress'),mode:$('#modeLabel'),countdown:$('#countdown'),bombStatus:$('#bombStatus'),bombCooldown:$('#bombCooldown'),toast:$('#toast'),chat:$('#chatLog'),nameBox:$('#nameBox'),formula:$('#formulaBox')};
 const templates={
- sales:{title:'월간 매출 현황',file:'월간_매출현황_최종_v7.xlsx',heads:['구분','1월','2월','3월','1분기','전년비'],rows:['온라인','강남점','성수점','부산점','법인영업','해외영업','합계'],values:['₩ 24,800','₩ 31,420','₩ 27,950','₩ 84,170','+12.4%']},
- estimate:{title:'거래처 견적서',file:'견적서_야근방지연구소.xlsx',heads:['품목','규격','수량','단가','공급가액','비고'],rows:['클라우드 이용권','협업 도구','보안 점검','유지보수','커피 정기배송','총 견적'],values:['10 EA','₩ 120,000','₩ 1,200,000','별도 협의']},
- inventory:{title:'재고 관리대장',file:'재고관리_11월.xlsx',heads:['상품코드','상품명','입고','출고','현재고','상태'],rows:['A-1024','B-2048','C-4096','D-0815','E-1120','합계'],values:['모니터암','키보드','노트북 거치대','커피 원두','충분']},
- schedule:{title:'직원 근무 일정표',file:'근무일정_공유용.xlsx',heads:['이름','월','화','수','목','금'],rows:['김민지','이도윤','박서준','최하린','정유나','비고'],values:['09:00','재택','휴가','18:00','당직']},
- project:{title:'프로젝트 예산 현황',file:'프로젝트_예산_진행현황.xlsx',heads:['프로젝트','담당','예산','집행액','진행률','상태'],rows:['오로라','셀피하기','제우스','블루문','아틀라스','합계'],values:['₩ 45,000','₩ 28,500','63%','진행 중']}
+ sales:{title:'월간 매출 현황',subtitle:'2026년 상반기 채널별 매출 실적 및 목표 달성 현황 · 경영기획팀 내부 공유용',file:'월간_매출현황_최종_v7.xlsx',heads:['구분','1월','2월','3월','4월','5월','6월','상반기 누계','목표 달성률','전년 대비','담당 메모'],rows:['온라인','강남점','성수점','부산점','법인영업','해외영업','파트너 채널','합계'],values:['₩ 24,800','₩ 31,420','₩ 27,950','₩ 84,170','₩ 36,500','₩ 42,700','92.6%','+12.4%'],notes:['프로모션 유입 증가로 전월 대비 주문량 상승','리뉴얼 공사 이후 주말 매출 회복세','신규 고객 비중 증가 · 객단가 유지','지역 제휴 캠페인 효과 반영 예정','대형 계약 검토 중 · 확정 금액은 다음 달 반영','환율 변동분을 포함한 잠정 집계','신규 파트너 온보딩 비용 포함','마감 전 회계 검증이 필요한 잠정 합계']},
+ estimate:{title:'거래처 견적서',subtitle:'야근방지연구소 업무환경 개선 프로젝트 · 공급가액 및 납품 조건 상세 견적',file:'견적서_야근방지연구소.xlsx',heads:['품목','상세 규격','수량','단위','단가','공급가액','세액','납기','담당 부서','진행 상태','비고'],rows:['클라우드 이용권','협업 도구','보안 점검','유지보수','노트북 거치대','커피 정기배송','교육 세션','총 견적'],values:['10 EA','12개월','₩ 120,000','₩ 1,200,000','₩ 120,000','영업일 7일','협의 중','발주 대기'],notes:['계정 추가 시 동일 단가 적용 · 월별 정산 가능','관리자 교육 1회와 초기 설정 지원 포함','취약점 진단 보고서 및 개선 권고안 제공','장애 대응 SLA와 분기별 점검 비용 포함','색상과 수량은 발주 확정 전 변경 가능','회의가 길어질 경우 추가 원두는 별도 협의','온라인 교육 녹화본과 실습 자료 제공','유효기간 30일 · 부가세와 배송비 포함 최종 금액']},
+ inventory:{title:'재고 관리대장',subtitle:'본사 공용 비품 및 IT 장비 입출고 현황 · 실사 기준일 2026-11-10',file:'재고관리_11월.xlsx',heads:['상품코드','상품명','분류','입고','출고','현재고','안전재고','보관 위치','최근 입고일','상태','관리 메모'],rows:['A-1024','B-2048','C-4096','D-0815','E-1120','F-3310','G-7721','합계'],values:['모니터암','기계식 키보드','노트북 거치대','커피 원두','42 EA','18 EA','충분','재주문'],notes:['3층 창고 A열 · 신규 입사자 지급분 확보','테스트용 4개 제외 후 사용 가능 수량','회의실 교체분 예약 · 반출 전 확인 필요','다음 정기 배송은 금요일 오전 도착 예정','안전재고 미만으로 구매 요청 승인 대기','검수 완료 제품만 출고 가능','장기 미사용 재고는 다음 달 자산 정리 예정','실사 차이 2건은 자산 담당자가 확인 중']},
+ schedule:{title:'직원 근무 일정표',subtitle:'제품개발팀 주간 근무 및 당직 일정 · 변경 사항은 매일 오전 10시까지 반영',file:'근무일정_공유용.xlsx',heads:['이름','월요일','화요일','수요일','목요일','금요일','근무 형태','당직','휴가 잔여','담당 업무','공유 사항'],rows:['김민지','이도윤','박서준','최하린','정유나','한지후','윤수아','팀 공지'],values:['09:00~18:00','재택','오피스','반차','당직','외근','12일','백엔드'],notes:['오후 고객 인터뷰 참석 · 회의실 B 예약','배포 점검 후 재택 전환 예정','신규 기능 QA 지원과 운영 이슈 대응','금요일 오전 반차 · 인수인계 문서 업데이트','디자인 리뷰 일정에 따라 출근 시간 조정','야간 당직 후 다음 날 오전 재택','채용 인터뷰 패널 참석으로 오후 일정 비움','긴급 변경은 팀 채널에 먼저 공유해주세요']},
+ project:{title:'프로젝트 예산 현황',subtitle:'2026년 주요 프로젝트 예산 집행 및 리스크 검토 현황 · PMO 주간 보고',file:'프로젝트_예산_진행현황.xlsx',heads:['프로젝트','담당','승인 예산','집행액','잔여 예산','집행률','진행률','예상 완료일','리스크','상태','PM 메모'],rows:['오로라','셀피하기','제우스','블루문','아틀라스','그린라이트','노바','합계'],values:['₩ 45,000','₩ 28,500','₩ 16,500','63%','72%','2026-12-18','주의','진행 중'],notes:['외부 API 비용 증가 가능성 · 다음 주 재산정','실시간 네트워크 안정화 테스트 진행 중','고객 검수 일정이 확정되면 잔금 집행 예정','디자인 범위 변경 요청에 대한 영향도 분석 중','데이터 이전 리허설 완료 · 본 작업 승인 대기','계약서 법무 검토로 착수 일정 조정','베타 피드백 반영 후 운영 이관 예정','예비비를 포함한 전체 포트폴리오 잠정 합계']}
 };
 
 let state={phase:'lobby',players:[],blocked:new Set(),bombs:[],captures:0,duration:240,endsAt:0,startedAt:0,countdownEndsAt:0,headStartEndsAt:0,speed:100,difficulty:'easy',template:'sales',keys:[],lastInput:0,roundId:0,winner:null,finishReason:''};
@@ -102,9 +102,11 @@ function paintTemplate(){
   const t=templates[state.template];document.querySelector('.file-title').textContent=t.file;document.querySelector('.sheet-tab').textContent=t.title;
   for(const [key,el] of cells){const [r,c]=key.split(':').map(Number);el.className='cell data-cell';let text='';
     if(r===1&&c===1){text=t.title;el.classList.add('report-title')}
-    else if(r===3&&c>=1&&c<=6){text=t.heads[c-1];el.classList.add('report-head')}
-    else if(r>=4&&r<=10&&c>=1&&c<=6){text=c===1?(t.rows[r-4]||''):t.values[(r+c)%t.values.length];if(c>=3)el.classList.add('money');if(r===10)el.classList.add('total')}
-    else if((r===13&&c>=2&&c<=8)||(r===14&&c>=2&&c<=5)){text=['담당자','검토 완료','※ 내부 공유용','2026-11-09'][c%4]||''}
+    else if(r===2&&c===1){text=t.subtitle;el.classList.add('spill','sheet-subtitle')}
+    else if(r===3&&c>=1&&c<=t.heads.length){text=t.heads[c-1];el.classList.add('report-head')}
+    else if(r>=4&&r<4+t.rows.length&&c>=1&&c<=t.heads.length){const rowIndex=r-4;text=c===1?t.rows[rowIndex]:c===t.heads.length?t.notes[rowIndex]:t.values[(rowIndex+c-2)%t.values.length];if(/^₩|%$|^\+| EA$/.test(text))el.classList.add('money');if(c===t.heads.length)el.classList.add('spill','row-note');if(rowIndex===t.rows.length-1)el.classList.add('total')}
+    else if(r===14&&c===2){text='※ 내부 공유용 · 본 자료는 마감 전 잠정 수치를 포함하고 있습니다.';el.classList.add('spill','sheet-note')}
+    else if(r===15&&c===2){text='최종 수정 2026-11-10 09:30 · 담당자 검토 완료 · 외부 전송 금지';el.classList.add('spill','sheet-note')}
     el.textContent=text;if(state.blocked.has(key))el.classList.add('blocked')
   }
 }
