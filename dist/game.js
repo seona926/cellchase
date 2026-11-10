@@ -268,6 +268,9 @@ gridWrap.addEventListener('pointerdown',e=>{if(!matchMedia('(max-width: 700px)')
 gridWrap.addEventListener('pointermove',e=>{if(e.pointerId!==touchMove.pointerId)return;touchMove.x=e.clientX;touchMove.y=e.clientY;updateJoystick()});
 gridWrap.addEventListener('pointerup',e=>{if(e.pointerId===touchMove.pointerId)clearTouchMove()});gridWrap.addEventListener('pointercancel',clearTouchMove);
 gridWrap.addEventListener('selectstart',e=>{if(matchMedia('(max-width: 700px)').matches)e.preventDefault()});gridWrap.addEventListener('dragstart',e=>e.preventDefault());
+document.addEventListener('gesturestart',e=>{if(matchMedia('(max-width: 700px)').matches)e.preventDefault()},{passive:false});
+document.addEventListener('gesturechange',e=>{if(matchMedia('(max-width: 700px)').matches)e.preventDefault()},{passive:false});
+document.addEventListener('touchmove',e=>{if(matchMedia('(max-width: 700px)').matches&&e.touches.length>1)e.preventDefault()},{passive:false});
 $('#abilityCard').addEventListener('click',()=>{if(state.phase!=='playing')return;if(network.active&&!network.isHost)network.command?.send({type:'bomb'},{target:network.hostPeer});else placeBomb(local(),performance.now())});
 $('#chatInput').addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.target.blur()} });
 $('#chatForm').addEventListener('submit',e=>{e.preventDefault();const input=$('#chatInput'),text=input.value.trim();if(!text)return;if(network.active&&!network.isHost)network.command?.send({type:'chat',text},{target:network.hostPeer});else{appendChat(local()?.name||'나',text);if(network.active)network.chat?.send({name:local()?.name||'방장',text})}input.value='';input.blur()});
